@@ -1,30 +1,31 @@
 # Publicação no GitHub
 
+O repositório é [guijas1/SE-backend](https://github.com/guijas1/SE-backend), **privado**, com a branch principal `main`. Para clonar, a conta GitHub precisa ter acesso ao repositório.
+
 O `.gitignore` exclui bancos SQLite, backups, ambientes virtuais e `.env`. O modelo `.env.example` é versionado para que outra pessoa possa configurar as portas da própria máquina.
 
 Antes de publicar, confira `git status --short`. Não inclua um banco ou configuração local à força usando `git add -f`.
 
-## Repositório novo
+## Enviar alterações
 
-Crie um repositório vazio no GitHub com o nome e a visibilidade escolhidos pela equipe. Copie a URL HTTPS/SSH dele. Na raiz do projeto:
+O remote `origin` já está configurado no projeto publicado e será criado automaticamente ao clonar. Na raiz do projeto:
 
 ```bash
-git init -b main
+git pull --ff-only
 git add .
-git commit -m "Organiza SmartAir para execução e publicação"
-git remote add origin URL_DO_REPOSITORIO
-git push -u origin main
+git commit -m "Descreva a alteração realizada"
+git push origin main
 ```
 
-Se o Git já tiver sido inicializado ou existir um commit, continue a partir da configuração do remote. Confira com `git status` e `git remote -v`. A autenticação pode ser feita com `gh auth login` ou pelo método Git usado pela equipe.
+Confira a configuração com `git status` e `git remote -v`. A autenticação pode ser feita com `gh auth login` ou pelo método Git usado pela equipe. Antes de `git pull`, registre ou guarde alterações locais pendentes.
 
-Se o repositório remoto já tiver arquivos, primeiro integre esse histórico; não use push forçado para apagá-los. A licença de distribuição deve ser escolhida pela equipe antes de acrescentar um arquivo LICENSE.
+Se houver alterações remotas que precisem ser integradas, resolva essa integração antes de enviar; não use push forçado para apagar o histórico. A licença de distribuição deve ser escolhida pela equipe antes de acrescentar um arquivo LICENSE.
 
 ## Para outra pessoa executar
 
 ```bash
-git clone URL_DO_REPOSITORIO
-cd NOME_DO_REPOSITORIO
+git clone https://github.com/guijas1/SE-backend.git
+cd SE-backend
 docker compose up -d --build
 ```
 

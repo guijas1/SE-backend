@@ -4,11 +4,15 @@ Este repositório contém somente o software Python do SmartAir. O firmware do E
 
 ## Início rápido
 
-Instale e inicie Docker com Docker Compose. Abra um terminal na raiz deste repositório, onde está `compose.yaml`, e execute:
+Instale e inicie Docker com Docker Compose. Com acesso ao repositório privado, clone o projeto e execute:
 
 ```bash
+git clone https://github.com/guijas1/SE-backend.git
+cd SE-backend
 docker compose up -d --build
 ```
+
+Se já tiver o projeto na máquina, execute apenas o comando Docker na pasta que contém `compose.yaml`.
 
 Pare a API/Streamlit que já estiverem executando diretamente no Python para liberar as portas. A primeira construção exige internet.
 
