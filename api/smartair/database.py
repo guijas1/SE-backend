@@ -1,5 +1,6 @@
 """SQLite connection and backward-compatible schema initialization."""
 
+import json
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -22,6 +23,7 @@ _COLUMNS = {
     "limite_mq_alerta": "INTEGER",
     "limite_mq_normal": "INTEGER",
     "estado_mq": "TEXT",
+    "estado_sistema": "TEXT",
     "erro_dht": "INTEGER",
     "alerta_temperatura": "INTEGER",
     "alerta_umidade": "INTEGER",
@@ -30,6 +32,8 @@ _COLUMNS = {
     "led_verde": "INTEGER",
     "led_vermelho": "INTEGER",
     "buzzer": "INTEGER",
+    "buzzer_alerta": "INTEGER",
+    "motivos_alerta": "TEXT",
     "criado_em": "TEXT",
 }
 
@@ -68,6 +72,8 @@ def inicializar() -> None:
 
 def salvar(payload: dict, criado_em: str) -> int:
     values = {**payload, "criado_em": criado_em}
+    if values.get("motivos_alerta") is not None:
+        values["motivos_alerta"] = json.dumps(values["motivos_alerta"], ensure_ascii=False)
     columns = list(_COLUMNS)
     placeholders = ", ".join("?" for _ in columns)
     query = f"INSERT INTO leituras ({', '.join(columns)}) VALUES ({placeholders})"
@@ -89,9 +95,12 @@ def _formatar(row: sqlite3.Row | None) -> dict | None:
         "led_verde",
         "led_vermelho",
         "buzzer",
+        "buzzer_alerta",
     ):
         if item[name] is not None:
             item[name] = bool(item[name])
+    if item["motivos_alerta"] is not None:
+        item["motivos_alerta"] = json.loads(item["motivos_alerta"])
     return item
 
 

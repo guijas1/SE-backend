@@ -1,11 +1,19 @@
 {
-  "temperatura": 23.9,
-  "umidade": 66.9,
-  "mq135": 437,
+  "temperatura": 24.3,
+  "umidade": 65.4,
+  "mq135": 449,
   "alerta": false,
+  "estadoSistema": "NORMAL",
   "alertaTemperatura": false,
   "alertaUmidade": false,
   "alertaQualidadeAr": false,
-  "baselineMQ135": 420,
-  "limiteMQ135": 720
+  "ledVerde": true,
+  "ledVermelho": false,
+  "buzzerAlerta": false,
+  "buzzerEmitindoSom": false,
+  "estadoMQ135": "PRONTO",
+  "baselineMQ135": 442,
+  "limiteMQ135": 742,
+  "limiteNormalMQ135": 642,
+  "motivosAlerta": []
 }

@@ -9,7 +9,7 @@ from smartair.schemas import TelemetryInput, alerta_geral
 
 
 database.inicializar()
-app = FastAPI(title="SmartAir API", version="1.0.0")
+app = FastAPI(title="SmartAir API", version="1.1.0")
 
 
 @app.get("/api/health")

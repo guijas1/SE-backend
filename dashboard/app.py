@@ -74,25 +74,37 @@ def mostrar_grafico(dados, campo, nome, unidade, cor, horas):
 
 def mostrar_alertas(ultima: dict) -> None:
     sinais = [
-        ("erro_dht", "Falha de leitura no sensor DHT22", "error"),
-        ("alerta_temperatura", "Temperatura acima do limite configurado", "warning"),
-        ("alerta_umidade", "Umidade acima do limite configurado", "warning"),
-        ("alerta_qualidade_ar", "Leitura do MQ-135 acima do limite configurado", "warning"),
+        ("erro_dht", "ERRO NO SENSOR DHT22", "Falha de leitura no sensor DHT22", "error"),
+        ("alerta_temperatura", "TEMPERATURA ALTA", "Temperatura acima do limite configurado", "warning"),
+        ("alerta_umidade", "UMIDADE ALTA", "Umidade acima do limite configurado", "warning"),
+        ("alerta_qualidade_ar", "QUALIDADE DO AR ALTERADA", "Leitura do MQ-135 acima do limite configurado", "warning"),
     ]
-    ativos = [(texto, nivel) for campo, texto, nivel in sinais if ultima.get(campo) is True]
-    desconhecidos = all(ultima.get(campo) is None for campo, _, _ in sinais)
+    ativos = [(motivo, texto, nivel) for campo, motivo, texto, nivel in sinais if ultima.get(campo) is True]
+    motivos = ultima.get("motivos_alerta") or []
+    motivos_exibidos = {motivo for motivo, _, _ in ativos}
 
     st.subheader("Alertas e sensores")
     esquerda, direita = st.columns([1.2, 1])
     with esquerda:
         with st.container(border=True):
             if ativos:
-                for texto, nivel in ativos:
+                for _, texto, nivel in ativos:
                     getattr(st, nivel)(texto)
-            elif desconhecidos:
-                st.info("O firmware ainda não enviou os estados dos alertas.")
-            else:
-                st.success("Nenhum alerta ativo na última leitura.")
+            for motivo in motivos:
+                if motivo not in motivos_exibidos:
+                    st.warning(motivo)
+                    motivos_exibidos.add(motivo)
+            if not ativos and not motivos:
+                if ultima.get("alerta_geral") is True or ultima.get("estado_sistema") == "ALERTA":
+                    st.warning("O sistema reportou um alerta sem motivos detalhados.")
+                elif (
+                    ultima.get("alerta_geral") is False
+                    or ultima.get("estado_sistema") == "NORMAL"
+                    or all(ultima.get(campo) is False for campo, _, _, _ in sinais)
+                ):
+                    st.success("Nenhum alerta ativo na última leitura.")
+                else:
+                    st.info("O firmware ainda não enviou informações suficientes sobre os alertas.")
     with direita:
         with st.container(border=True):
             st.markdown("**Calibração do MQ-135**")
@@ -107,10 +119,20 @@ def mostrar_alertas(ultima: dict) -> None:
                 st.caption(explicacoes[estado_mq])
 
     st.markdown("**Atuadores**")
-    led_verde, led_vermelho, buzzer = st.columns(3)
+    led_verde, led_vermelho, buzzer_alerta, buzzer_som = st.columns(4)
     led_verde.metric("LED verde", estado_atuador(ultima.get("led_verde")))
     led_vermelho.metric("LED vermelho", estado_atuador(ultima.get("led_vermelho")))
-    buzzer.metric("Buzzer", estado_atuador(ultima.get("buzzer")))
+    modo = ultima.get("buzzer_alerta")
+    som = ultima.get("buzzer")
+    buzzer_alerta.metric(
+        "Buzzer · modo de alerta",
+        "Sem telemetria" if modo is None else ("Ativo" if modo else "Inativo"),
+    )
+    buzzer_som.metric(
+        "Buzzer · som na amostra",
+        "Sem telemetria" if som is None else ("Emitindo som" if som else "Sem som"),
+    )
+    st.caption("Estados registrados na última leitura recebida. O buzzer pode estar em modo de alerta e em pausa entre os bipes.")
 
 
 def estado_atuador(valor: bool | None) -> str:
@@ -152,8 +174,9 @@ def painel():
     ativo = idade <= 12
     estado_mq = ultima.get("estado_mq") or "Não informado"
 
-    status_col, mq_col, horario_col = st.columns([1, 1, 2])
-    status_col.metric("Sistema", "Online" if ativo else "Sem sinal", f"Última leitura há {idade}s")
+    status_col, estado_col, mq_col, horario_col = st.columns([1, 1, 1, 2])
+    status_col.metric("Comunicação", "Online" if ativo else "Sem sinal", f"Última leitura há {idade}s")
+    estado_col.metric("Estado informado", ultima.get("estado_sistema") or "Sem telemetria")
     mq_col.metric("Sensor MQ-135", estado_mq)
     horario_col.metric("Última atualização", instante.astimezone(ZoneInfo(FUSO_HORARIO)).strftime("%d/%m/%Y às %H:%M:%S"))
 
@@ -174,6 +197,8 @@ def painel():
 
     if ultima.get("erro_dht") is True:
         st.warning("O DHT22 reportou erro. Temperatura e umidade desta leitura foram removidas para evitar exibir valores antigos como atuais.")
+
+    mostrar_alertas(ultima)
 
     dados = preparar_historico(historico, FUSO_HORARIO)
     if not dados.empty:
@@ -221,15 +246,20 @@ def painel():
             f"{len(temperaturas_validas)}/{total}",
         )
 
-        mostrar_alertas(ultima)
-
         with st.expander("Tabela de telemetria recebida"):
             tabela = dados.sort_values("criado_em", ascending=False).copy()
             tabela["criado_em"] = tabela["criado_em"].dt.strftime("%d/%m/%Y %H:%M:%S")
+            if "motivos_alerta" in tabela:
+                tabela["motivos_alerta"] = tabela["motivos_alerta"].map(
+                    lambda motivos: "; ".join(motivos) if isinstance(motivos, list) and motivos
+                    else ("Nenhum" if isinstance(motivos, list) else "Não informado")
+                )
             colunas = [
                 "criado_em", "temperatura", "umidade", "mq135_adc", "baseline_mq135",
-                "estado_mq", "alerta_temperatura", "alerta_umidade",
+                "limite_mq_normal", "limite_mq_alerta", "estado_mq", "estado_sistema",
+                "alerta_temperatura", "alerta_umidade",
                 "alerta_qualidade_ar", "erro_dht", "alerta_geral",
+                "motivos_alerta", "led_verde", "led_vermelho", "buzzer_alerta", "buzzer",
             ]
             disponiveis = [coluna for coluna in colunas if coluna in tabela]
             tabela = tabela[disponiveis].rename(
@@ -239,12 +269,20 @@ def painel():
                     "umidade": "Umidade %",
                     "mq135_adc": "MQ-135 ADC",
                     "baseline_mq135": "Baseline ADC",
+                    "limite_mq_normal": "Limite normal ADC",
+                    "limite_mq_alerta": "Limite alerta ADC",
                     "estado_mq": "Calibração MQ-135",
+                    "estado_sistema": "Estado informado",
                     "alerta_temperatura": "Alerta temperatura",
                     "alerta_umidade": "Alerta umidade",
                     "alerta_qualidade_ar": "Alerta MQ-135",
                     "erro_dht": "Erro DHT",
                     "alerta_geral": "Alerta geral",
+                    "motivos_alerta": "Motivos do alerta",
+                    "led_verde": "LED verde",
+                    "led_vermelho": "LED vermelho",
+                    "buzzer_alerta": "Buzzer em modo de alerta",
+                    "buzzer": "Buzzer emitindo som",
                 }
             )
             st.dataframe(tabela, use_container_width=True, hide_index=True)

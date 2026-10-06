@@ -1,8 +1,21 @@
 """Validated request and response data models."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
+
+
+MotivoAlerta = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)
+]
 
 
 class TelemetryInput(BaseModel):
@@ -34,10 +47,13 @@ class TelemetryInput(BaseModel):
         default=None,
         ge=0,
         le=8190,
-        validation_alias=AliasChoices("limite_mq_normal", "limiteMQNormal"),
+        validation_alias=AliasChoices("limite_mq_normal", "limiteMQNormal", "limiteNormalMQ135"),
     )
     estado_mq: Literal["AQUECENDO", "CALIBRANDO", "PRONTO"] | None = Field(
-        default=None, validation_alias=AliasChoices("estado_mq", "estadoMQ")
+        default=None, validation_alias=AliasChoices("estado_mq", "estadoMQ", "estadoMQ135")
+    )
+    estado_sistema: Literal["NORMAL", "ALERTA"] | None = Field(
+        default=None, validation_alias=AliasChoices("estado_sistema", "estadoSistema")
     )
     erro_dht: bool | None = Field(default=None, validation_alias=AliasChoices("erro_dht", "erroDHT"))
     alerta_temperatura: bool | None = Field(
@@ -57,12 +73,24 @@ class TelemetryInput(BaseModel):
         default=None, validation_alias=AliasChoices("led_vermelho", "ledVermelho")
     )
     buzzer: bool | None = Field(
-        default=None, validation_alias=AliasChoices("buzzer", "buzzerLigado")
+        default=None,
+        description="Indica se o buzzer emitia som no instante da amostra.",
+        validation_alias=AliasChoices("buzzer", "buzzerLigado", "buzzerEmitindoSom"),
+    )
+    buzzer_alerta: bool | None = Field(
+        default=None,
+        description="Indica modo de alerta sonoro ativo, inclusive nas pausas entre bipes.",
+        validation_alias=AliasChoices("buzzer_alerta", "buzzerAlerta"),
+    )
+    motivos_alerta: list[MotivoAlerta] | None = Field(
+        default=None,
+        max_length=16,
+        validation_alias=AliasChoices("motivos_alerta", "motivosAlerta"),
     )
 
-    @field_validator("estado_mq", mode="before")
+    @field_validator("estado_mq", "estado_sistema", mode="before")
     @classmethod
-    def normalizar_estado_mq(cls, valor):
+    def normalizar_estado(cls, valor):
         if valor is None or (isinstance(valor, str) and not valor.strip()):
             return None
         if isinstance(valor, str):
@@ -110,8 +138,12 @@ def alerta_geral(leitura: TelemetryInput) -> bool | None:
     ]
     if any(sinal is True for sinal in sinais):
         return True
+    if leitura.estado_sistema == "ALERTA":
+        return True
     if leitura.alerta_geral is not None:
         return leitura.alerta_geral
+    if leitura.estado_sistema == "NORMAL":
+        return False
     if all(sinal is False for sinal in sinais):
         return False
     return None
