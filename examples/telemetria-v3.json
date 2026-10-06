@@ -1,0 +1,11 @@
+{
+  "temperatura": 23.9,
+  "umidade": 66.9,
+  "mq135": 437,
+  "alerta": false,
+  "alertaTemperatura": false,
+  "alertaUmidade": false,
+  "alertaQualidadeAr": false,
+  "baselineMQ135": 420,
+  "limiteMQ135": 720
+}

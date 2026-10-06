@@ -1,0 +1,14 @@
+# Send only the sources needed by the application image.
+**
+!requirements.txt
+!api/
+!api/requirements.txt
+!api/smartair/
+!api/smartair/**
+!dashboard/
+!dashboard/requirements.txt
+!dashboard/*.py
+**/__pycache__/
+**/*.pyc
+**/*.db
+**/*.db-*
