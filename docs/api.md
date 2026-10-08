@@ -61,3 +61,5 @@ Campos desconhecidos, valores fora da faixa ou limites de calibração incoerent
 Quando configurado, o monitor envia eventos ao Power Automate em segundo plano. A leitura e seu evento são gravados na mesma transação; uma falha de rede no webhook não impede a recepção da telemetria. Consulte o [guia de configuração e contrato do webhook](power-automate.md).
 
 `GET /api/notificacoes/status` retorna `habilitado`, `dispositivo`, `conexao` (`aguardando`, `online` ou `offline`), `ultima_leitura_em`, `offline_apos_segundos`, `resumo_intervalo_segundos`, `pendentes`, `em_envio`, `enviados`, `ultimo_envio_em` e `ultimo_erro`. `enviados` contabiliza eventos aceitos pelo endpoint HTTP, não confirma a entrega do e-mail. `ultimo_erro` contém apenas um diagnóstico resumido, como `HTTP 401` ou falha de conexão.
+
+`alerta_intervalo_minimo_segundos` informa o bloqueio de repetição configurado em `SMARTAIR_ALERT_COOLDOWN_SECONDS` (300 por padrão). `suprimidos` conta os eventos com alertas já enviados recentemente que foram mantidos na fila como registro, sem fazer outro POST ao Power Automate. Um alerta de outro tipo é liberado imediatamente.

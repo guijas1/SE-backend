@@ -57,3 +57,5 @@ O modelo também mostra `leitura.ventilacao_ligada`. Uma mudança da ventilaçã
 O relé também aparece no modelo: `leitura.rele_ligado` informa acionamento e `leitura.rele_habilitado` informa habilitação no firmware. Na planilha, use `Rele_Ligado` e `Rele_Habilitado`, mapeados respectivamente para `triggerBody()?['leitura']?['rele_ligado']` e `triggerBody()?['leitura']?['rele_habilitado']`. Mudanças desses estados, por si só, não satisfazem o filtro de alerta.
 
 O filtro evita e-mails por outras mudanças enquanto um alerta permanece inalterado. Novas tentativas HTTP do mesmo evento ainda podem repetir a execução; use `evento_id` para deduplicação no fluxo se necessário, como descrito no [guia de integração](power-automate.md#persist%C3%AAncia-e-novas-tentativas).
+
+O backend também bloqueia repetições de alertas já enviados por 5 minutos, por padrão, com `SMARTAIR_ALERT_COOLDOWN_SECONDS`. Esse bloqueio fica salvo no banco, considera a fila existente e libera alertas de outro tipo. Ele atua antes do POST, sem exigir outra condição no fluxo. A deduplicação por `evento_id` continua sendo a proteção para uma confirmação HTTP perdida.

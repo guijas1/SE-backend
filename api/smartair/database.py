@@ -91,6 +91,13 @@ def inicializar() -> None:
                 ultimo_erro TEXT
             )"""
         )
+        banco.execute(
+            """CREATE TABLE IF NOT EXISTS notificacao_alertas_enviados (
+                campo TEXT PRIMARY KEY,
+                enviado_em REAL NOT NULL
+            )"""
+        )
+        banco.execute("CREATE INDEX IF NOT EXISTS notificacoes_envio ON notificacoes (enviado_em)")
 
 
 def salvar(payload: dict, criado_em: str) -> int:

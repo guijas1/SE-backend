@@ -70,6 +70,7 @@ Em desenvolvimento sem Docker, exporte as variáveis no terminal antes de inicia
 | `SMARTAIR_OFFLINE_AFTER_SECONDS` | `12` | Tempo sem telemetria para considerar offline. |
 | `SMARTAIR_NOTIFICATION_CHECK_SECONDS` | `2` | Intervalo de verificação da conexão e da fila. |
 | `SMARTAIR_NOTIFICATION_TIMEOUT_SECONDS` | `10` | Timeout de cada chamada ao webhook. |
+| `SMARTAIR_ALERT_COOLDOWN_SECONDS` | `300` | Bloqueio de repetição de alertas já enviados; `0` desativa. |
 | `SMARTAIR_SUMMARY_INTERVAL_SECONDS` | `0` | Intervalo dos resumos; `0` desativa. |
 | `SMARTAIR_NOTIFICATION_TIMEZONE` | `America/Sao_Paulo` | Fuso do texto do e-mail. |
 
@@ -87,6 +88,10 @@ Para testar offline, interrompa temporariamente os envios do ESP32 mantendo o ba
 `pendentes` e `em_envio` indicam eventos na fila; `enviados` conta os aceitos pelo endpoint. `ultimo_envio_em` e `ultimo_erro` ajudam a diagnosticar sem revelar a URL assinada. Erros HTTP 400 indicam geralmente contrato/fluxo; 401/403, URL ou autenticação; 429, limite de chamadas; falhas de conexão podem indicar internet, DNS ou timeout.
 
 ## Persistência e novas tentativas
+
+O backend mantém um bloqueio de repetição de 5 minutos, por padrão. Antes de enviar um evento online com alertas ativos, compara esses tipos com os já aceitos pelo webhook. Se todos foram enviados dentro do intervalo, marca o evento como `suprimido` e não faz outro POST. Se houver um alerta de outro tipo ou o intervalo tiver expirado, libera o envio. A comparação também cobre eventos de calibração/atuadores e resumos enquanto os mesmos alertas permanecem ativos; as pausas do buzzer não contam como outro tipo quando o modo sonoro é conhecido.
+
+O intervalo começa após HTTP 2xx, fica salvo no SQLite e respeita envios recentes anteriores à atualização. Eventos suprimidos permanecem no banco da fila e as leituras continuam no histórico local, mas não chegam ao Power Automate nem à planilha. O status informa `suprimidos` e `alerta_intervalo_minimo_segundos`. Retorno ao normal sem alertas ativos e eventos offline seguem o envio normal; a condição do fluxo continua controlando quais eventos viram e-mail.
 
 Os eventos e o estado de comparação ficam no mesmo SQLite das leituras, incluídos nos backups. A leitura e sua notificação são gravadas na mesma transação. O envio ocorre em segundo plano e falhas de rede não interrompem os POSTs da telemetria. Reiniciar a API preserva a fila e não repete alertas inalterados.
 

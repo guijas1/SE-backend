@@ -29,6 +29,10 @@ SINAIS = {
     "rele_ligado": ("Relé ligado", "Relé desligado"),
     "rele_habilitado": ("Relé habilitado", "Relé desabilitado"),
 }
+ALERTAS = frozenset({
+    "alerta_geral", "alerta_temperatura", "alerta_umidade", "alerta_qualidade_ar",
+    "erro_dht", "buzzer_alerta", "buzzer",
+})
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,7 @@ class NotificationConfig:
     check_interval_seconds: int = 2
     request_timeout_seconds: int = 10
     summary_interval_seconds: int = 0
+    alert_cooldown_seconds: int = 300
     timezone_name: str = "America/Sao_Paulo"
 
     def __post_init__(self):
@@ -51,6 +56,8 @@ class NotificationConfig:
                 raise ValueError(f"{field} deve ser maior que zero")
         if self.summary_interval_seconds < 0:
             raise ValueError("summary_interval_seconds não pode ser negativo")
+        if self.alert_cooldown_seconds < 0:
+            raise ValueError("alert_cooldown_seconds não pode ser negativo")
         ZoneInfo(self.timezone_name)
 
     @property
@@ -66,6 +73,7 @@ class NotificationConfig:
             check_interval_seconds=int(os.getenv("SMARTAIR_NOTIFICATION_CHECK_SECONDS", "2")),
             request_timeout_seconds=int(os.getenv("SMARTAIR_NOTIFICATION_TIMEOUT_SECONDS", "10")),
             summary_interval_seconds=int(os.getenv("SMARTAIR_SUMMARY_INTERVAL_SECONDS", "0")),
+            alert_cooldown_seconds=int(os.getenv("SMARTAIR_ALERT_COOLDOWN_SECONDS", "300")),
             timezone_name=os.getenv("SMARTAIR_NOTIFICATION_TIMEZONE", "America/Sao_Paulo"),
         )
 
@@ -231,13 +239,61 @@ class NotificationService:
         banco.execute("INSERT INTO notificacoes (id, payload, criado_em) VALUES (?, ?, ?)",
                       (evento_id, json.dumps(payload, ensure_ascii=False), payload["ocorrido_em"]))
 
+    @staticmethod
+    def _alertas_ativos(payload: str) -> set[str]:
+        evento = json.loads(payload)
+        if evento.get("conexao") != "online":
+            return set()
+        leitura = evento.get("leitura", {})
+        campos = {campo for campo in ALERTAS if leitura.get(campo) is True}
+        if leitura.get("buzzer_alerta") is not None:
+            campos.discard("buzzer")  # Beep pulses do not constitute a new alert type.
+        return campos
+
     def _reservar(self, agora: datetime) -> dict | None:
         with database.conectar() as banco:
             banco.execute("BEGIN IMMEDIATE")
-            row = banco.execute("SELECT * FROM notificacoes WHERE status != 'enviado' ORDER BY rowid LIMIT 1").fetchone()
+            row = banco.execute(
+                "SELECT * FROM notificacoes WHERE status IN ('pendente', 'enviando') ORDER BY rowid LIMIT 1"
+            ).fetchone()
             if row is None or row["proxima_tentativa"] > agora.timestamp() or row["lease_ate"] > agora.timestamp():
                 return None
             item = dict(row)
+            alertas = self._alertas_ativos(item["payload"])
+            intervalo = self.config.alert_cooldown_seconds
+            if alertas and intervalo:
+                limite = agora.timestamp() - intervalo
+                recentes = {
+                    salvo["campo"] for salvo in banco.execute(
+                        "SELECT campo FROM notificacao_alertas_enviados WHERE enviado_em > ?",
+                        (limite,),
+                    )
+                }
+                if not alertas.issubset(recentes):
+                    # Honor events accepted before the cooldown table existed.
+                    enviados = banco.execute(
+                        "SELECT payload, enviado_em FROM notificacoes WHERE status = 'enviado' AND enviado_em >= ?",
+                        (datetime.fromtimestamp(limite, timezone.utc).isoformat(),),
+                    ).fetchall()
+                    for enviado in enviados:
+                        timestamp = instante(enviado["enviado_em"]).timestamp()
+                        if timestamp <= limite:
+                            continue
+                        for campo in self._alertas_ativos(enviado["payload"]):
+                            recentes.add(campo)
+                            banco.execute(
+                                """INSERT INTO notificacao_alertas_enviados (campo, enviado_em) VALUES (?, ?)
+                                   ON CONFLICT(campo) DO UPDATE SET enviado_em = max(enviado_em, excluded.enviado_em)""",
+                                (campo, timestamp),
+                            )
+                if alertas.issubset(recentes):
+                    banco.execute(
+                        """UPDATE notificacoes SET status = 'suprimido', ultimo_erro = NULL,
+                           lease_ate = 0, lease_token = NULL WHERE id = ?""",
+                        (item["id"],),
+                    )
+                    logger.info("Evento %s suprimido pelo intervalo de repetição de alertas", item["id"])
+                    return None
             item["lease_token"] = str(uuid4())
             item["tentativas"] += 1
             banco.execute(
@@ -274,10 +330,17 @@ class NotificationService:
                 )
                 logger.warning("Power Automate: evento %s pendente (%s); nova tentativa em %ss", item["id"], erro, atraso)
             else:
-                banco.execute(
+                atualizado = banco.execute(
                     "UPDATE notificacoes SET status = 'enviado', enviado_em = ?, ultimo_erro = NULL, lease_ate = 0, lease_token = NULL WHERE id = ? AND lease_token = ?",
                     (concluido.isoformat(timespec="seconds"), item["id"], item["lease_token"]),
                 )
+                if atualizado.rowcount:
+                    for campo in self._alertas_ativos(item["payload"]):
+                        banco.execute(
+                            """INSERT INTO notificacao_alertas_enviados (campo, enviado_em) VALUES (?, ?)
+                               ON CONFLICT(campo) DO UPDATE SET enviado_em = excluded.enviado_em""",
+                            (campo, concluido.timestamp()),
+                        )
         return True
 
     def status(self) -> dict:
@@ -292,7 +355,9 @@ class NotificationService:
                 "ultima_leitura_em": leitura["criado_em"] if leitura else None,
                 "offline_apos_segundos": self.config.offline_after_seconds,
                 "resumo_intervalo_segundos": self.config.summary_interval_seconds,
+                "alerta_intervalo_minimo_segundos": self.config.alert_cooldown_seconds,
                 "pendentes": contagens.get("pendente", 0), "em_envio": contagens.get("enviando", 0),
+                "suprimidos": contagens.get("suprimido", 0),
                 "enviados": contagens.get("enviado", 0), "ultimo_envio_em": ultimo,
                 "ultimo_erro": falha[0] if falha else None}
 

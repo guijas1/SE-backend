@@ -48,6 +48,13 @@ class NotificationsTest(unittest.TestCase):
         with database.conectar() as banco:
             return dict(banco.execute("SELECT * FROM notificacoes ORDER BY rowid LIMIT 1").fetchone())
 
+    def successful_endpoint(self):
+        response = MagicMock()
+        response.__enter__.return_value.status = 202
+        opener = MagicMock()
+        opener.open.return_value = response
+        return opener
+
     def test_disabled_saves_without_notifications(self):
         self.record(service=NotificationService(NotificationConfig()), alerta=True)
         self.assertEqual(self.events(), [])
@@ -281,6 +288,97 @@ class NotificationsTest(unittest.TestCase):
         self.assertEqual(self.row()["status"], "pendente")
         self.assertEqual(self.service.status()["ultimo_erro"], "HTTP 503")
 
+    def test_alert_cooldown_suppresses_repeats_and_preserves_recovery(self):
+        opener = self.successful_endpoint()
+        with patch("smartair.notifications.build_opener", return_value=opener):
+            self.record(alertaTemperatura=True)
+            self.assertTrue(self.service.enviar_pendente(self.now))
+            self.record(1, alerta=False, alertaTemperatura=False)
+            self.assertTrue(self.service.enviar_pendente(self.now + timedelta(seconds=1)))
+            self.record(2, alertaTemperatura=True)
+            restarted = NotificationService(self.config)
+            self.assertFalse(restarted.enviar_pendente(self.now + timedelta(seconds=2)))
+            self.assertEqual(restarted.status()["suprimidos"], 1)
+            self.record(3, alerta=False, alertaTemperatura=False)
+            self.assertTrue(restarted.enviar_pendente(self.now + timedelta(seconds=3)))
+        self.assertEqual(opener.open.call_count, 3)
+        self.assertEqual(len(database.historico(1, 100)), 4)
+        self.assertEqual(self.service.status()["pendentes"], 0)
+        self.assertEqual(self.service.status()["alerta_intervalo_minimo_segundos"], 300)
+
+    def test_alert_cooldown_allows_a_different_alert_immediately(self):
+        opener = self.successful_endpoint()
+        with patch("smartair.notifications.build_opener", return_value=opener):
+            self.record(alertaTemperatura=True)
+            self.service.enviar_pendente(self.now)
+            self.record(1, alertaTemperatura=True, alertaQualidadeAr=True)
+            self.assertTrue(self.service.enviar_pendente(self.now + timedelta(seconds=1)))
+        self.assertEqual(opener.open.call_count, 2)
+        self.assertEqual(self.service.status()["suprimidos"], 0)
+
+    def test_alert_cooldown_expires_at_the_configured_limit(self):
+        opener = self.successful_endpoint()
+        with patch("smartair.notifications.build_opener", return_value=opener):
+            self.record(alerta=True)
+            self.service.enviar_pendente(self.now)
+            self.record(1, alerta=False)
+            self.service.enviar_pendente(self.now + timedelta(seconds=1))
+            self.record(2, alerta=True)
+            with database.conectar() as banco:
+                timestamp = banco.execute("SELECT enviado_em FROM notificacao_alertas_enviados WHERE campo = 'alerta_geral'").fetchone()[0]
+            after_hold = datetime.fromtimestamp(timestamp + 300, timezone.utc)
+            self.assertTrue(self.service.enviar_pendente(after_hold))
+        self.assertEqual(opener.open.call_count, 3)
+        self.assertEqual(self.service.status()["suprimidos"], 0)
+
+    def test_alert_cooldown_covers_status_changes_during_an_active_alert(self):
+        opener = self.successful_endpoint()
+        with patch("smartair.notifications.build_opener", return_value=opener):
+            self.record(alerta=True, buzzerAlerta=True, buzzerLigado=False, estadoMQ="AQUECENDO")
+            self.service.enviar_pendente(self.now)
+            self.record(1, alerta=True, buzzerAlerta=True, buzzerLigado=True, estadoMQ="PRONTO")
+            self.assertFalse(self.service.enviar_pendente(self.now + timedelta(seconds=1)))
+        self.assertEqual(opener.open.call_count, 1)
+        self.assertEqual(self.service.status()["suprimidos"], 1)
+
+    def test_failed_delivery_does_not_start_alert_cooldown(self):
+        self.record(alerta=True)
+        opener = self.successful_endpoint()
+        opener.open.side_effect = HTTPError(self.config.webhook_url, 503, "unavailable", {}, None)
+        with patch("smartair.notifications.build_opener", return_value=opener):
+            self.service.enviar_pendente(self.now)
+            with database.conectar() as banco:
+                self.assertEqual(banco.execute("SELECT count(*) FROM notificacao_alertas_enviados").fetchone()[0], 0)
+            opener.open.side_effect = None
+            retry_time = datetime.fromtimestamp(self.row()["proxima_tentativa"] + 1, timezone.utc)
+            self.assertTrue(self.service.enviar_pendente(retry_time))
+        self.assertEqual(self.row()["status"], "enviado")
+        self.assertEqual(self.row()["tentativas"], 2)
+        self.assertEqual(self.service.status()["suprimidos"], 0)
+
+    def test_alert_cooldown_can_be_disabled(self):
+        service = NotificationService(NotificationConfig(webhook_url=self.config.webhook_url, alert_cooldown_seconds=0))
+        opener = self.successful_endpoint()
+        with patch("smartair.notifications.build_opener", return_value=opener):
+            for seconds, alert in enumerate((True, False, True)):
+                self.record(seconds, service=service, alerta=alert)
+                self.assertTrue(service.enviar_pendente(self.now + timedelta(seconds=seconds)))
+        self.assertEqual(opener.open.call_count, 3)
+
+    def test_alert_cooldown_uses_deliveries_from_before_the_upgrade(self):
+        opener = self.successful_endpoint()
+        with patch("smartair.notifications.build_opener", return_value=opener):
+            self.record(alerta=True)
+            self.service.enviar_pendente(self.now)
+            with database.conectar() as banco:
+                banco.execute("DELETE FROM notificacao_alertas_enviados")
+            self.record(1, alerta=False)
+            self.service.enviar_pendente(self.now + timedelta(seconds=1))
+            self.record(2, alerta=True)
+            self.assertFalse(NotificationService(self.config).enviar_pendente(self.now + timedelta(seconds=2)))
+        self.assertEqual(opener.open.call_count, 2)
+        self.assertEqual(self.service.status()["suprimidos"], 1)
+
     def test_timeout_does_not_expose_url(self):
         self.record()
         opener = MagicMock()
@@ -400,6 +498,8 @@ class NotificationsTest(unittest.TestCase):
             NotificationConfig(webhook_url="http://example.invalid")
         with self.assertRaises(ValueError):
             NotificationConfig(offline_after_seconds=0)
+        with self.assertRaises(ValueError):
+            NotificationConfig(alert_cooldown_seconds=-1)
 
 
 if __name__ == "__main__":
