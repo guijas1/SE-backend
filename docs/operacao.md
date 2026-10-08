@@ -76,4 +76,6 @@ Os padrões são 8080 para API e 8501 para dashboard. Se precisar trocar, copie 
 | ESP32 retorna erro de conexão | Conferir IP, porta, Wi-Fi, firewall e acesso entre dispositivos. |
 | Estado de sensor/atuador não informado | O firmware precisa enviar esse campo; o Python não inventa o estado. |
 
-Após 12 segundos sem novas leituras, o painel indica ausência de sinal recente. Os gráficos apresentam até 5.000 amostras por consulta no período escolhido, com horário de Brasília.
+Após 12 segundos sem novas leituras, por padrão, o painel indica ausência de sinal recente. `SMARTAIR_OFFLINE_AFTER_SECONDS` altera esse limite no painel e nas notificações. Os gráficos apresentam até 5.000 amostras por consulta no período escolhido, com horário de Brasília.
+
+Para receber e-mails quando o ESP32 perder sinal, voltar a enviar dados ou mudar de alerta, siga o [guia do Power Automate](power-automate.md). A API precisa continuar executando para detectar ausência de telemetria. Se a própria máquina/API parar, este monitor não consegue avisar; isso exige monitoramento externo.

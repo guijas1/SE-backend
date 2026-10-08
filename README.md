@@ -39,6 +39,7 @@ Nas próximas execuções, `docker compose up -d` inicia a imagem existente. Par
 │   │   ├── main.py           # rotas FastAPI
 │   │   ├── schemas.py        # validação/normalização
 │   │   ├── database.py       # SQLite e consultas
+│   │   ├── notifications.py  # eventos e webhook Power Automate
 │   │   └── backup.py         # exportação/importação do banco
 │   └── requirements.txt
 ├── dashboard/
@@ -53,9 +54,12 @@ Nas próximas execuções, `docker compose up -d` inicia a imagem existente. Par
 
 - [Executar, atualizar, fazer backup e trocar de máquina](docs/operacao.md)
 - [Contrato JSON e rotas da API](docs/api.md)
+- [E-mails de status e alertas pelo Power Automate](docs/power-automate.md)
 - [Desenvolver sem Docker](docs/desenvolvimento.md)
 - [Publicar e clonar pelo GitHub](docs/github.md)
 
 O banco local fica em `smartair.db`; no Docker, fica em um volume persistente. Bancos, backups e arquivos `.env` não são enviados ao GitHub. O histórico existente precisa ser importado separadamente seguindo o guia de operação.
 
 O painel mostra somente dados recebidos pela API. Estados opcionais ausentes são indicados como não informados. O sinal do MQ-135 é apresentado em ADC, sem conversão calibrada para ppm/AQI.
+
+O backend pode notificar mudanças de conexão, alertas, falhas de sensor e modo do buzzer por um webhook do Power Automate. O envio fica desativado até configurar `SMARTAIR_POWER_AUTOMATE_URL`. Os eventos ficam em uma fila persistente com novas tentativas em caso de falha. Consulte o [guia de configuração](docs/power-automate.md).

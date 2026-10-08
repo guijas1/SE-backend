@@ -18,6 +18,7 @@ st.set_page_config(
 )
 
 API_URL = os.getenv("SMARTAIR_API_URL", "http://127.0.0.1:8080").rstrip("/")
+OFFLINE_AFTER_SECONDS = int(os.getenv("SMARTAIR_OFFLINE_AFTER_SECONDS", "12"))
 JANELAS = {"1 hora": 1, "6 horas": 6, "24 horas": 24, "7 dias": 168}
 FUSO_HORARIO = "America/Sao_Paulo"
 CONFIG_GRAFICO = {"displaylogo": False, "scrollZoom": False}
@@ -132,6 +133,14 @@ def mostrar_alertas(ultima: dict) -> None:
         "Buzzer · som na amostra",
         "Sem telemetria" if som is None else ("Emitindo som" if som else "Sem som"),
     )
+    rele, ventilacao, habilitacao = st.columns(3)
+    rele.metric("Relé", estado_atuador(ultima.get("rele_ligado")))
+    ventilacao.metric("Ventilação", estado_atuador(ultima.get("ventilacao_ligada")))
+    habilitado = ultima.get("rele_habilitado")
+    habilitacao.metric(
+        "Relé · habilitação",
+        "Sem telemetria" if habilitado is None else ("Habilitado" if habilitado else "Desabilitado"),
+    )
     st.caption("Estados registrados na última leitura recebida. O buzzer pode estar em modo de alerta e em pausa entre os bipes.")
 
 
@@ -171,7 +180,7 @@ def painel():
 
     instante = data_hora(ultima["criado_em"])
     idade = max(0, int((datetime.now(timezone.utc) - instante).total_seconds()))
-    ativo = idade <= 12
+    ativo = (datetime.now(timezone.utc) - instante).total_seconds() <= OFFLINE_AFTER_SECONDS
     estado_mq = ultima.get("estado_mq") or "Não informado"
 
     status_col, estado_col, mq_col, horario_col = st.columns([1, 1, 1, 2])
@@ -259,7 +268,8 @@ def painel():
                 "limite_mq_normal", "limite_mq_alerta", "estado_mq", "estado_sistema",
                 "alerta_temperatura", "alerta_umidade",
                 "alerta_qualidade_ar", "erro_dht", "alerta_geral",
-                "motivos_alerta", "led_verde", "led_vermelho", "buzzer_alerta", "buzzer",
+                "motivos_alerta", "led_verde", "led_vermelho", "buzzer_alerta", "buzzer", "ventilacao_ligada",
+                "rele_ligado", "rele_habilitado",
             ]
             disponiveis = [coluna for coluna in colunas if coluna in tabela]
             tabela = tabela[disponiveis].rename(
@@ -283,6 +293,9 @@ def painel():
                     "led_vermelho": "LED vermelho",
                     "buzzer_alerta": "Buzzer em modo de alerta",
                     "buzzer": "Buzzer emitindo som",
+                    "ventilacao_ligada": "Ventilação ligada",
+                    "rele_ligado": "Relé ligado",
+                    "rele_habilitado": "Relé habilitado",
                 }
             )
             st.dataframe(tabela, use_container_width=True, hide_index=True)

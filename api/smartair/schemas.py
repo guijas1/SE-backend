@@ -68,9 +68,13 @@ class TelemetryInput(BaseModel):
     alerta_geral: bool | None = Field(
         default=None, validation_alias=AliasChoices("alerta_geral", "alertaGeral", "alerta")
     )
-    led_verde: bool | None = Field(default=None, validation_alias=AliasChoices("led_verde", "ledVerde"))
+    led_verde: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("led_verde", "ledVerde", "ledVerdeLigado"),
+    )
     led_vermelho: bool | None = Field(
-        default=None, validation_alias=AliasChoices("led_vermelho", "ledVermelho")
+        default=None,
+        validation_alias=AliasChoices("led_vermelho", "ledVermelho", "ledVermelhoLigado"),
     )
     buzzer: bool | None = Field(
         default=None,
@@ -80,7 +84,22 @@ class TelemetryInput(BaseModel):
     buzzer_alerta: bool | None = Field(
         default=None,
         description="Indica modo de alerta sonoro ativo, inclusive nas pausas entre bipes.",
-        validation_alias=AliasChoices("buzzer_alerta", "buzzerAlerta"),
+        validation_alias=AliasChoices("buzzer_alerta", "buzzerAlerta", "buzzerEmAlerta"),
+    )
+    ventilacao_ligada: bool | None = Field(
+        default=None,
+        description="Estado da ventilação informado pelo ESP32.",
+        validation_alias=AliasChoices("ventilacao_ligada", "ventilacaoLigada"),
+    )
+    rele_ligado: bool | None = Field(
+        default=None,
+        description="Estado de acionamento do relé informado pelo ESP32.",
+        validation_alias=AliasChoices("rele_ligado", "releLigado"),
+    )
+    rele_habilitado: bool | None = Field(
+        default=None,
+        description="Indica se o firmware permite o acionamento do relé.",
+        validation_alias=AliasChoices("rele_habilitado", "releHabilitado"),
     )
     motivos_alerta: list[MotivoAlerta] | None = Field(
         default=None,

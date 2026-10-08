@@ -1,0 +1,117 @@
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+  <tr>
+    <td align="center" style="padding:24px 12px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:#ffffff;border:1px solid #e5e7eb;">
+        <tr>
+          <td style="padding:18px 24px;background-color:#123d32;color:#ffffff;font-size:20px;font-weight:bold;">
+            SmartAir <span style="font-size:13px;font-weight:normal;">| Monitoramento ambiental</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px;background-color:#fef2f2;border-bottom:3px solid #dc2626;">
+            <p style="margin:0 0 8px;color:#b91c1c;font-size:12px;font-weight:bold;letter-spacing:1px;">ALERTA DETECTADO</p>
+            <h1 style="margin:0 0 12px;font-size:24px;line-height:32px;color:#991b1b;">O SmartAir registrou uma condição de alerta</h1>
+            <p style="margin:0;font-size:15px;line-height:24px;">Verifique os alertas e as leituras abaixo para avaliar a situação no local monitorado.</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;line-height:22px;">
+              <tr>
+                <th align="left" style="padding:0 0 8px;color:#6b7280;font-weight:normal;">Dispositivo</th>
+                <td align="right" style="padding:0 0 8px;font-weight:bold;">@{replace(replace(replace(coalesce(triggerBody()?['dispositivo'], 'SmartAir ESP32'), '&', '&amp;'), '<', '&lt;'), '>', '&gt;')}</td>
+              </tr>
+              <tr>
+                <th align="left" style="padding:0 0 8px;color:#6b7280;font-weight:normal;">Data do evento</th>
+                <td align="right" style="padding:0 0 8px;">@{convertTimeZone(triggerBody()?['ocorrido_em'], 'UTC', 'E. South America Standard Time', 'dd/MM/yyyy HH:mm:ss')} (Brasília)</td>
+              </tr>
+              <tr>
+                <th align="left" style="padding:0 0 8px;color:#6b7280;font-weight:normal;">Última leitura</th>
+                <td align="right" style="padding:0 0 8px;">@{convertTimeZone(triggerBody()?['leitura']?['criado_em'], 'UTC', 'E. South America Standard Time', 'dd/MM/yyyy HH:mm:ss')} (Brasília)</td>
+              </tr>
+              <tr>
+                <th align="left" style="color:#6b7280;font-weight:normal;">Conexão no evento</th>
+                <td align="right">Online</td>
+              </tr>
+            </table>
+
+            <h2 style="margin:24px 0 12px;font-size:17px;color:#111827;">Alertas na leitura</h2>
+            <table width="100%" cellpadding="10" cellspacing="0" border="0" style="border:1px solid #e5e7eb;font-size:14px;line-height:20px;">
+              <tr style="background-color:#f9fafb;">
+                <th align="left" scope="col">Monitoramento</th>
+                <th align="right" scope="col">Estado</th>
+              </tr>
+              <tr>
+                <td style="border-top:1px solid #e5e7eb;">Alerta geral</td>
+                <td align="right" style="border-top:1px solid #e5e7eb;">@{if(equals(triggerBody()?['leitura']?['alerta_geral'], true), 'ATIVO', if(equals(triggerBody()?['leitura']?['alerta_geral'], null), 'Não informado', 'Inativo'))}</td>
+              </tr>
+              <tr>
+                <td style="border-top:1px solid #e5e7eb;">Temperatura</td>
+                <td align="right" style="border-top:1px solid #e5e7eb;">@{if(equals(triggerBody()?['leitura']?['alerta_temperatura'], true), 'ATIVO', if(equals(triggerBody()?['leitura']?['alerta_temperatura'], null), 'Não informado', 'Inativo'))}</td>
+              </tr>
+              <tr>
+                <td style="border-top:1px solid #e5e7eb;">Umidade</td>
+                <td align="right" style="border-top:1px solid #e5e7eb;">@{if(equals(triggerBody()?['leitura']?['alerta_umidade'], true), 'ATIVO', if(equals(triggerBody()?['leitura']?['alerta_umidade'], null), 'Não informado', 'Inativo'))}</td>
+              </tr>
+              <tr>
+                <td style="border-top:1px solid #e5e7eb;">Qualidade do ar</td>
+                <td align="right" style="border-top:1px solid #e5e7eb;">@{if(equals(triggerBody()?['leitura']?['alerta_qualidade_ar'], true), 'ATIVO', if(equals(triggerBody()?['leitura']?['alerta_qualidade_ar'], null), 'Não informado', 'Inativo'))}</td>
+              </tr>
+              <tr>
+                <td style="border-top:1px solid #e5e7eb;">Falha no sensor DHT22</td>
+                <td align="right" style="border-top:1px solid #e5e7eb;">@{if(equals(triggerBody()?['leitura']?['erro_dht'], true), 'DETECTADA', if(equals(triggerBody()?['leitura']?['erro_dht'], null), 'Não informado', 'Não detectada'))}</td>
+              </tr>
+              <tr>
+                <td style="border-top:1px solid #e5e7eb;">Modo de alerta sonoro</td>
+                <td align="right" style="border-top:1px solid #e5e7eb;">@{if(equals(triggerBody()?['leitura']?['buzzer_alerta'], true), 'ATIVO', if(equals(triggerBody()?['leitura']?['buzzer_alerta'], null), 'Não informado', 'Inativo'))}</td>
+              </tr>
+              <tr>
+                <td style="border-top:1px solid #e5e7eb;">Som do buzzer na amostra</td>
+                <td align="right" style="border-top:1px solid #e5e7eb;">@{if(equals(triggerBody()?['leitura']?['buzzer'], true), 'Detectado', if(equals(triggerBody()?['leitura']?['buzzer'], null), 'Não informado', 'Sem som'))}</td>
+              </tr>
+            </table>
+
+            <h2 style="margin:24px 0 12px;font-size:17px;color:#111827;">Motivos informados pelo equipamento</h2>
+            <p style="margin:0;padding:14px;background-color:#fff7ed;border-left:4px solid #f97316;font-size:14px;line-height:22px;">@{if(empty(triggerBody()?['leitura']?['motivos_alerta']), 'Sem motivos adicionais informados.', replace(replace(replace(join(coalesce(triggerBody()?['leitura']?['motivos_alerta'], json('[]')), '; '), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'))}</p>
+
+            <h2 style="margin:24px 0 12px;font-size:17px;color:#111827;">Leituras registradas</h2>
+            <table width="100%" cellpadding="10" cellspacing="0" border="0" style="border:1px solid #e5e7eb;font-size:14px;line-height:20px;">
+              <tr>
+                <th align="left" scope="row" style="font-weight:normal;">Temperatura</th>
+                <td align="right" style="font-weight:bold;">@{if(equals(triggerBody()?['leitura']?['temperatura'], null), 'Não informada', concat(string(triggerBody()?['leitura']?['temperatura']), ' °C'))}</td>
+              </tr>
+              <tr>
+                <th align="left" scope="row" style="border-top:1px solid #e5e7eb;font-weight:normal;">Umidade</th>
+                <td align="right" style="border-top:1px solid #e5e7eb;font-weight:bold;">@{if(equals(triggerBody()?['leitura']?['umidade'], null), 'Não informada', concat(string(triggerBody()?['leitura']?['umidade']), ' %'))}</td>
+              </tr>
+              <tr>
+                <th align="left" scope="row" style="border-top:1px solid #e5e7eb;font-weight:normal;">MQ-135</th>
+                <td align="right" style="border-top:1px solid #e5e7eb;font-weight:bold;">@{if(equals(triggerBody()?['leitura']?['mq135_adc'], null), 'Não informado', concat(string(triggerBody()?['leitura']?['mq135_adc']), ' ADC'))}</td>
+              </tr>
+              <tr>
+                <th align="left" scope="row" style="border-top:1px solid #e5e7eb;font-weight:normal;">Ventilação</th>
+                <td align="right" style="border-top:1px solid #e5e7eb;font-weight:bold;">@{if(equals(triggerBody()?['leitura']?['ventilacao_ligada'], true), 'Ligada', if(equals(triggerBody()?['leitura']?['ventilacao_ligada'], null), 'Não informada', 'Desligada'))}</td>
+              </tr>
+              <tr>
+                <th align="left" scope="row" style="border-top:1px solid #e5e7eb;font-weight:normal;">Relé</th>
+                <td align="right" style="border-top:1px solid #e5e7eb;font-weight:bold;">@{if(equals(triggerBody()?['leitura']?['rele_ligado'], true), 'Ligado', if(equals(triggerBody()?['leitura']?['rele_ligado'], null), 'Não informado', 'Desligado'))}</td>
+              </tr>
+              <tr>
+                <th align="left" scope="row" style="border-top:1px solid #e5e7eb;font-weight:normal;">Habilitação do relé</th>
+                <td align="right" style="border-top:1px solid #e5e7eb;font-weight:bold;">@{if(equals(triggerBody()?['leitura']?['rele_habilitado'], true), 'Habilitado', if(equals(triggerBody()?['leitura']?['rele_habilitado'], null), 'Não informada', 'Desabilitado'))}</td>
+              </tr>
+            </table>
+
+            <p style="margin:20px 0 0;font-size:14px;line-height:22px;">Consulte o painel SmartAir para acompanhar as próximas leituras e a evolução dos alertas.</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 24px;background-color:#f9fafb;border-top:1px solid #e5e7eb;font-size:12px;line-height:20px;color:#6b7280;">
+            Mensagem automática do SmartAir. Os estados apresentados correspondem à leitura registrada no evento.<br>
+            Referência: @{triggerBody()?['evento_id']}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>

@@ -32,6 +32,7 @@ python -m streamlit run dashboard/app.py
 | Rotas HTTP | `api/smartair/main.py` |
 | Persistência e histórico | `api/smartair/database.py` |
 | Backup/importação | `api/smartair/backup.py` |
+| Eventos, monitoramento e webhook Power Automate | `api/smartair/notifications.py` |
 | Indicadores e organização da tela | `dashboard/app.py` |
 | Eixos, séries e horários dos gráficos | `dashboard/charts.py` |
 
@@ -44,3 +45,12 @@ docker compose config --quiet
 ```
 
 Ao alterar a telemetria, confira a compatibilidade com `examples/telemetria-v3.json` e atualize o [contrato da API](api.md). Depois de alterar arquivos usados no Docker, execute `docker compose up -d --build`.
+
+## Testes de notificações
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m unittest discover -s tests -v
+```
+
+Os testes usam bancos temporários e simulam o endpoint HTTP, sem enviar e-mails. Cobrem transições, ausência de campos, falhas DHT, pausas do buzzer, offline/reconexão, reinício, resumos, transações, concorrência, novas tentativas e as rotas da API.

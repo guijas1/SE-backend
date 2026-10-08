@@ -1,15 +1,32 @@
 """SmartAir telemetry API."""
 
+import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 
 from smartair import database
+from smartair.notifications import NotificationConfig, NotificationService
 from smartair.schemas import TelemetryInput, alerta_geral
 
 
-database.inicializar()
-app = FastAPI(title="SmartAir API", version="1.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    database.inicializar()
+    servico = NotificationService(NotificationConfig.from_env())
+    app.state.notifications = servico
+    parar = asyncio.Event()
+    tarefa = asyncio.create_task(servico.executar(parar)) if servico.config.enabled else None
+    try:
+        yield
+    finally:
+        parar.set()
+        if tarefa:
+            await tarefa
+
+
+app = FastAPI(title="SmartAir API", version="1.2.0", lifespan=lifespan)
 
 
 @app.get("/api/health")
@@ -18,12 +35,17 @@ def health() -> dict[str, str]:
 
 
 @app.post("/api/dados")
-def receber_dados(leitura: TelemetryInput) -> dict[str, int | str]:
+def receber_dados(leitura: TelemetryInput, request: Request) -> dict[str, int | str]:
     payload = leitura.model_dump()
     payload["alerta_geral"] = alerta_geral(leitura)
     criado_em = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    leitura_id = database.salvar(payload, criado_em)
+    leitura_id = request.app.state.notifications.registrar_leitura(payload, criado_em)
     return {"status": "ok", "id": leitura_id}
+
+
+@app.get("/api/notificacoes/status")
+def consultar_status_notificacoes(request: Request) -> dict:
+    return request.app.state.notifications.status()
 
 
 @app.get("/api/dados")

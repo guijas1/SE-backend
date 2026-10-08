@@ -8,6 +8,7 @@ O arquivo `api/smartair/main.py` define as rotas. `schemas.py` valida e normaliz
 | `POST /api/dados` | Receber e persistir uma leitura do ESP32. |
 | `GET /api/dados` | Consultar a última leitura; 404 antes da primeira. |
 | `GET /api/dados/historico?horas=24&limite=1000` | Consultar amostras recentes, da mais nova para a mais antiga. |
+| `GET /api/notificacoes/status` | Consultar conexão do ESP32, configuração de notificações e contagens da fila, sem expor o webhook. |
 
 ## Payload do ESP32
 
@@ -28,9 +29,13 @@ Veja [examples/telemetria-v3.json](../examples/telemetria-v3.json). Esse arquivo
 | `alerta_umidade` | `alertaUmidade` | Booleano |
 | `alerta_qualidade_ar` | `alertaQualidadeAr` | Booleano |
 | `alerta_geral` | `alertaGeral`, `alerta` | Booleano |
-| `led_verde`, `led_vermelho` | `ledVerde`, `ledVermelho` | Booleano |
+| `led_verde` | `ledVerde`, `ledVerdeLigado` | Booleano |
+| `led_vermelho` | `ledVermelho`, `ledVermelhoLigado` | Booleano |
 | `buzzer` | `buzzerLigado`, `buzzerEmitindoSom` | Som emitido no instante da amostra, booleano |
-| `buzzer_alerta` | `buzzerAlerta` | Modo de alerta sonoro ativo, booleano |
+| `buzzer_alerta` | `buzzerAlerta`, `buzzerEmAlerta` | Modo de alerta sonoro ativo, booleano |
+| `ventilacao_ligada` | `ventilacaoLigada` | Estado da ventilação informado pelo firmware, booleano |
+| `rele_ligado` | `releLigado` | Relé acionado, booleano |
+| `rele_habilitado` | `releHabilitado` | Relé habilitado no firmware, booleano |
 | `motivos_alerta` | `motivosAlerta` | Lista de até 16 textos de 1 a 120 caracteres |
 
 Temperatura e umidade devem ser enviadas juntas; o payload mínimo antigo continua aceito. Também é possível enviar o MQ-135 sozinho ou reportar uma falha DHT. Campos opcionais omitidos permanecem desconhecidos.
@@ -43,4 +48,16 @@ O backend usa snake_case nas respostas, acrescenta `id` e `criado_em` em UTC e m
 
 `motivosAlerta: []` significa que o dispositivo enviou uma lista vazia; campo omitido resulta em `null`. A lista é armazenada em JSON no SQLite e devolvida como lista nas rotas de consulta. Ao iniciar a API, as colunas novas são adicionadas automaticamente ao banco existente; leituras antigas mantêm esses campos como `null`.
 
+`ventilacaoLigada` é aceito e devolvido como `ventilacao_ligada`, também no histórico e no webhook do Power Automate. O valor pode ser verdadeiro, falso ou nulo; ausência do campo significa estado desconhecido. Esse atuador não ativa o alerta geral por si só. O backend não controla o relé.
+
+O [payload com LEDs, buzzer e relé](../examples/telemetria-firmware-v2.json) também é aceito. `releLigado`, `releHabilitado` e `ventilacaoLigada` representam informações independentes e são preservados separadamente. Um relé pode estar habilitado e desligado. Esses estados não ativam o alerta geral por si só; campos omitidos ficam nulos. Os alertas ambientais são os informados pelo firmware; o backend não recalcula `alertaQualidadeAr` a partir do ADC e do limite.
+
+O [exemplo do firmware completo atual](../examples/telemetria-firmware-v1.json) contém os campos enviados por `SmartAir1.ino.ino` após a calibração. Os campos adicionais do exemplo v3 são opcionais. O backend aceita falhas DHT com `erroDHT: true` e temperatura/umidade nulas; o firmware precisa continuar fazendo POST durante a falha para ela ser registrada. Se ele suspender os envios, o backend detectará ausência de comunicação.
+
 Campos desconhecidos, valores fora da faixa ou limites de calibração incoerentes recebem HTTP 422. O POST válido responde HTTP 200 com `{"status":"ok","id":...}`. A API não converte o sinal ADC do MQ-135 em ppm/AQI e não controla os atuadores do ESP32.
+
+## Notificações
+
+Quando configurado, o monitor envia eventos ao Power Automate em segundo plano. A leitura e seu evento são gravados na mesma transação; uma falha de rede no webhook não impede a recepção da telemetria. Consulte o [guia de configuração e contrato do webhook](power-automate.md).
+
+`GET /api/notificacoes/status` retorna `habilitado`, `dispositivo`, `conexao` (`aguardando`, `online` ou `offline`), `ultima_leitura_em`, `offline_apos_segundos`, `resumo_intervalo_segundos`, `pendentes`, `em_envio`, `enviados`, `ultimo_envio_em` e `ultimo_erro`. `enviados` contabiliza eventos aceitos pelo endpoint HTTP, não confirma a entrega do e-mail. `ultimo_erro` contém apenas um diagnóstico resumido, como `HTTP 401` ou falha de conexão.

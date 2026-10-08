@@ -1,0 +1,54 @@
+{
+  "type": "object",
+  "required": ["evento_id", "tipo", "dispositivo", "ocorrido_em", "conexao", "assunto", "mensagem", "corpo_html", "mudancas", "leitura"],
+  "properties": {
+    "evento_id": {"type": "string"},
+    "tipo": {"type": "string"},
+    "dispositivo": {"type": "string"},
+    "ocorrido_em": {"type": "string"},
+    "conexao": {"type": "string"},
+    "assunto": {"type": "string"},
+    "mensagem": {"type": "string"},
+    "corpo_html": {"type": "string"},
+    "mudancas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "campo": {"type": "string"},
+          "anterior": {},
+          "atual": {},
+          "descricao": {"type": "string"}
+        }
+      }
+    },
+    "leitura": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "integer"},
+        "criado_em": {"type": "string"},
+        "temperatura": {"type": ["number", "null"]},
+        "umidade": {"type": ["number", "null"]},
+        "mq135_adc": {"type": ["integer", "null"]},
+        "baseline_mq135": {"type": ["integer", "null"]},
+        "limite_mq_alerta": {"type": ["integer", "null"]},
+        "limite_mq_normal": {"type": ["integer", "null"]},
+        "estado_mq": {"type": ["string", "null"]},
+        "estado_sistema": {"type": ["string", "null"]},
+        "erro_dht": {"type": ["boolean", "null"]},
+        "alerta_temperatura": {"type": ["boolean", "null"]},
+        "alerta_umidade": {"type": ["boolean", "null"]},
+        "alerta_qualidade_ar": {"type": ["boolean", "null"]},
+        "alerta_geral": {"type": ["boolean", "null"]},
+        "led_verde": {"type": ["boolean", "null"]},
+        "led_vermelho": {"type": ["boolean", "null"]},
+        "buzzer": {"type": ["boolean", "null"]},
+        "buzzer_alerta": {"type": ["boolean", "null"]},
+        "ventilacao_ligada": {"type": ["boolean", "null"]},
+        "rele_ligado": {"type": ["boolean", "null"]},
+        "rele_habilitado": {"type": ["boolean", "null"]},
+        "motivos_alerta": {"type": ["array", "null"], "items": {"type": "string"}}
+      }
+    }
+  }
+}

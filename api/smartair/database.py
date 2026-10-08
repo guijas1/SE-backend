@@ -33,6 +33,9 @@ _COLUMNS = {
     "led_vermelho": "INTEGER",
     "buzzer": "INTEGER",
     "buzzer_alerta": "INTEGER",
+    "ventilacao_ligada": "INTEGER",
+    "rele_ligado": "INTEGER",
+    "rele_habilitado": "INTEGER",
     "motivos_alerta": "TEXT",
     "criado_em": "TEXT",
 }
@@ -68,18 +71,43 @@ def inicializar() -> None:
         for name, sql_type in _COLUMNS.items():
             if name not in existing:
                 banco.execute(f"ALTER TABLE leituras ADD COLUMN {name} {sql_type}")
+        banco.execute(
+            """CREATE TABLE IF NOT EXISTS notificacao_estado (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                dados TEXT NOT NULL
+            )"""
+        )
+        banco.execute(
+            """CREATE TABLE IF NOT EXISTS notificacoes (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                criado_em TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pendente',
+                tentativas INTEGER NOT NULL DEFAULT 0,
+                proxima_tentativa REAL NOT NULL DEFAULT 0,
+                lease_token TEXT,
+                lease_ate REAL NOT NULL DEFAULT 0,
+                enviado_em TEXT,
+                ultimo_erro TEXT
+            )"""
+        )
 
 
 def salvar(payload: dict, criado_em: str) -> int:
+    with conectar() as banco:
+        return inserir_leitura(banco, payload, criado_em)
+
+
+def inserir_leitura(banco: sqlite3.Connection, payload: dict, criado_em: str) -> int:
+    """Insert using the caller's transaction, including any notification events."""
     values = {**payload, "criado_em": criado_em}
     if values.get("motivos_alerta") is not None:
         values["motivos_alerta"] = json.dumps(values["motivos_alerta"], ensure_ascii=False)
     columns = list(_COLUMNS)
     placeholders = ", ".join("?" for _ in columns)
     query = f"INSERT INTO leituras ({', '.join(columns)}) VALUES ({placeholders})"
-    with conectar() as banco:
-        cursor = banco.execute(query, [values.get(name) for name in columns])
-        return int(cursor.lastrowid)
+    cursor = banco.execute(query, [values.get(name) for name in columns])
+    return int(cursor.lastrowid)
 
 
 def _formatar(row: sqlite3.Row | None) -> dict | None:
@@ -96,6 +124,9 @@ def _formatar(row: sqlite3.Row | None) -> dict | None:
         "led_vermelho",
         "buzzer",
         "buzzer_alerta",
+        "ventilacao_ligada",
+        "rele_ligado",
+        "rele_habilitado",
     ):
         if item[name] is not None:
             item[name] = bool(item[name])

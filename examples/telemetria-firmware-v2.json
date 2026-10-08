@@ -1,0 +1,20 @@
+{
+  "temperatura": 31.5,
+  "umidade": 68.0,
+  "mq135": 420,
+  "alerta": true,
+  "alertaTemperatura": true,
+  "alertaUmidade": false,
+  "alertaQualidadeAr": false,
+  "erroDHT": false,
+  "ledVerdeLigado": false,
+  "ledVermelhoLigado": true,
+  "buzzerLigado": true,
+  "buzzerEmAlerta": true,
+  "releLigado": true,
+  "ventilacaoLigada": true,
+  "estadoMQ": "PRONTO",
+  "baselineMQ135": 100,
+  "limiteMQ135": 400,
+  "releHabilitado": true
+}
