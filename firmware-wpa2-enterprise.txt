@@ -1,0 +1,491 @@
+
+/*
+  SmartAir ESP32 - Firmware v4.2
+  Hardware: ESP32 + DHT22 + MQ-135 + 2 LEDs + buzzer + HL-52S (IN2)
+  Sem OLED e sem Bluetooth.
+  Serial: 9600 baud | Relé: GPIO27, ativo em LOW.
+
+  Bibliotecas: ArduinoJson 7, DHT sensor library,
+  Adafruit Unified Sensor (dependencia DHT).
+*/
+
+#include <Arduino.h>
+#include <WiFi.h>
+
+// Compatibilidade com versoes diferentes do pacote Arduino ESP32.
+#if __has_include("esp_eap_client.h")
+#include "esp_eap_client.h"
+#else
+#include "esp_wpa2.h"
+#endif
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <DHT.h>
+
+// ========================================================
+// 1. CONFIGURACAO DE REDE - PREENCHA AS SUAS CREDENCIAIS
+// ========================================================
+const char* WIFI_SSID = "NOME_DA_REDE_EMPRESARIAL";
+const char* WIFI_USERNAME = "SEU_USUARIO";
+const char* WIFI_PASSWORD = "SUA_SENHA";
+
+// Identidade externa/anonima configurada no celular.
+// Se nao houver uma diferente, tente inicialmente o proprio usuario.
+const char* WIFI_IDENTITY = WIFI_USERNAME;
+
+// IP do computador que executa o backend, acessivel pela rede do ESP32.
+const char* SERVER_URL = "http://10.25.1.0:8080/api/dados";
+
+// nullptr: nao valida o certificado do servidor, reduzindo a protecao
+// das credenciais. Corresponde a opcao "Nao validar" do celular.
+// Para validar, substitua pelo conteudo PEM do certificado CA do TI.
+const char* WIFI_CA_CERT = nullptr;
+
+// ========================================================
+// 2. PINOS REAIS DO SMARTAIR
+// ========================================================
+#define DHT_PIN 4
+#define DHT_TYPE DHT22          // Alterar para DHT11 se for o seu sensor
+#define MQ135_PIN 34
+#define LED_VERDE 19
+#define LED_VERMELHO 18
+#define BUZZER_PIN 25
+#define RELE_PIN 27             // GPIO27 -> IN2 do HL-52S (canal testado)
+
+#define USAR_RELE 1
+#define RELE_ATIVO_EM_LOW 1    // Confirmado pelo teste manual do modulo
+
+// ========================================================
+// 3. LIMITES E INTERVALOS
+// ========================================================
+const float TEMP_ALERTA = 30.0f;
+const float TEMP_NORMAL = 28.5f;
+const float UMIDADE_ALERTA = 75.0f;
+const float UMIDADE_NORMAL = 70.0f;
+const int MQ_MARGEM_ALERTA = 300;
+const int MQ_MARGEM_NORMAL = 200;
+
+const unsigned long LEITURA_MS = 2000UL;
+const unsigned long HTTP_MS = 5000UL;
+const unsigned long WIFI_TENTATIVA_MS = 60000UL;
+const unsigned long MQ_AQUECIMENTO_MS = 60000UL;
+const unsigned long MQ_AMOSTRA_MS = 1000UL;
+const int MQ_TOTAL_AMOSTRAS = 30;
+const unsigned long BUZZER_LIGADO_MS = 300UL;
+const unsigned long BUZZER_PAUSA_MS = 1700UL;
+const unsigned int BUZZER_FREQUENCIA = 1000;
+
+// ========================================================
+// 4. ESTADO DO SISTEMA
+// ========================================================
+DHT dht(DHT_PIN, DHT_TYPE);
+float temperatura = NAN;
+float umidade = NAN;
+int mq135Valor = 0;
+int mq135Baseline = 0;
+int mq135LimiteAlerta = 0;
+int mq135LimiteNormal = 0;
+
+bool erroDHT = true;
+bool alertaTemperatura = false;
+bool alertaUmidade = false;
+bool alertaQualidadeAr = false;
+
+bool ledVerdeLigado = false;
+bool ledVermelhoLigado = false;
+bool buzzerLigado = false;
+bool buzzerEmAlerta = false;
+bool releLigado = false;
+bool ventilacaoLigada = false;
+
+enum EstadoMQ { MQ_AQUECENDO, MQ_CALIBRANDO, MQ_PRONTO };
+EstadoMQ estadoMQ = MQ_AQUECENDO;
+long somaCalibracaoMQ = 0;
+int amostrasCalibracaoMQ = 0;
+
+unsigned long inicioSistema = 0;
+unsigned long ultimaLeitura = 0;
+unsigned long ultimoHTTP = 0;
+unsigned long ultimaTentativaWiFi = 0;
+unsigned long ultimaAmostraMQ = 0;
+unsigned long ultimaTrocaBuzzer = 0;
+
+const char* estadoMQTexto() {
+  switch (estadoMQ) {
+    case MQ_AQUECENDO: return "AQUECENDO";
+    case MQ_CALIBRANDO: return "CALIBRANDO";
+    case MQ_PRONTO: return "PRONTO";
+  }
+  return "DESCONHECIDO";
+}
+
+const char* estadoTexto(bool estado) {
+  return estado ? "LIGADO" : "DESLIGADO";
+}
+
+bool obterAlertaGeral() {
+  return erroDHT || alertaTemperatura || alertaUmidade || alertaQualidadeAr;
+}
+
+// Falha isolada no DHT dispara alarme, mas NAO aciona ventilacao.
+bool obterAlertaAmbiental() {
+  return alertaQualidadeAr ||
+         (!erroDHT && (alertaTemperatura || alertaUmidade));
+}
+
+// ========================================================
+// 5. CONEXAO WI-FI
+// ========================================================
+void conectarWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+
+  ultimaTentativaWiFi = millis();
+
+  Serial.printf("Wi-Fi: tentando conectar em %s (TTLS/MSCHAPv2)\n",
+                WIFI_SSID);
+
+  WiFi.mode(WIFI_STA);
+
+  // MSCHAPv2 sem EAP na autenticacao interna.
+#if __has_include("esp_eap_client.h")
+  const esp_err_t resultado =
+      esp_eap_client_set_ttls_phase2_method(
+          ESP_EAP_TTLS_PHASE2_MSCHAPV2);
+#else
+  const esp_err_t resultado =
+      esp_wifi_sta_wpa2_ent_set_ttls_phase2_method(
+          ESP_EAP_TTLS_PHASE2_MSCHAPV2);
+#endif
+
+  if (resultado != ESP_OK) {
+    Serial.printf("Wi-Fi: erro ao configurar MSCHAPv2: %d\n",
+                  (int)resultado);
+    return;
+  }
+
+  WiFi.begin(
+    WIFI_SSID,
+    WPA2_AUTH_TTLS,
+    WIFI_IDENTITY,
+    WIFI_USERNAME,
+    WIFI_PASSWORD,
+    WIFI_CA_CERT,
+    nullptr,
+    nullptr
+  );
+}
+
+// ========================================================
+// 6. MQ-135: LEITURA, AQUECIMENTO E BASELINE RELATIVO
+// ========================================================
+int lerMQ135() {
+  long soma = 0;
+  for (int i = 0; i < 10; i++) {
+    soma += analogRead(MQ135_PIN);
+  }
+  return (int)(soma / 10);
+}
+
+void calibrarMQ135() {
+  const unsigned long agora = millis();
+
+  if (estadoMQ == MQ_AQUECENDO) {
+    if (agora - inicioSistema >= MQ_AQUECIMENTO_MS) {
+      estadoMQ = MQ_CALIBRANDO;
+      somaCalibracaoMQ = 0;
+      amostrasCalibracaoMQ = 0;
+      ultimaAmostraMQ = agora;
+      Serial.println("MQ-135: iniciando baseline de 30 amostras.");
+    }
+    return;
+  }
+
+  if (estadoMQ != MQ_CALIBRANDO) return;
+  if (agora - ultimaAmostraMQ < MQ_AMOSTRA_MS) return;
+
+  ultimaAmostraMQ = agora;
+  const int leitura = lerMQ135();
+  somaCalibracaoMQ += leitura;
+  amostrasCalibracaoMQ++;
+
+  Serial.printf("MQ-135: calibrando %d/%d | ADC=%d\n",
+                amostrasCalibracaoMQ, MQ_TOTAL_AMOSTRAS, leitura);
+
+  if (amostrasCalibracaoMQ >= MQ_TOTAL_AMOSTRAS) {
+    mq135Baseline = (int)(somaCalibracaoMQ / MQ_TOTAL_AMOSTRAS);
+    mq135LimiteAlerta = min(4095, mq135Baseline + MQ_MARGEM_ALERTA);
+    mq135LimiteNormal = min(4095, mq135Baseline + MQ_MARGEM_NORMAL);
+    estadoMQ = MQ_PRONTO;
+    Serial.printf("MQ-135 PRONTO | baseline=%d | alerta=%d | normal=%d\n",
+                  mq135Baseline, mq135LimiteAlerta, mq135LimiteNormal);
+  }
+}
+
+// ========================================================
+// 7. SENSORES E ALERTAS COM HISTERESE
+// ========================================================
+void atualizarSensores() {
+  const float t = dht.readTemperature();
+  const float u = dht.readHumidity();
+  erroDHT = isnan(t) || isnan(u);
+
+  if (erroDHT) {
+    Serial.println("DHT: erro de leitura.");
+    alertaTemperatura = false;
+    alertaUmidade = false;
+  } else {
+    temperatura = t;
+    umidade = u;
+
+    if (!alertaTemperatura && temperatura >= TEMP_ALERTA) {
+      alertaTemperatura = true;
+    } else if (alertaTemperatura && temperatura <= TEMP_NORMAL) {
+      alertaTemperatura = false;
+    }
+
+    if (!alertaUmidade && umidade >= UMIDADE_ALERTA) {
+      alertaUmidade = true;
+    } else if (alertaUmidade && umidade <= UMIDADE_NORMAL) {
+      alertaUmidade = false;
+    }
+  }
+
+  mq135Valor = lerMQ135();
+  if (estadoMQ == MQ_PRONTO) {
+    if (!alertaQualidadeAr && mq135Valor >= mq135LimiteAlerta) {
+      alertaQualidadeAr = true;
+    } else if (alertaQualidadeAr && mq135Valor <= mq135LimiteNormal) {
+      alertaQualidadeAr = false;
+    }
+  } else {
+    alertaQualidadeAr = false;
+  }
+}
+
+// ========================================================
+// 8. ATUADORES
+// ========================================================
+void controlarLEDs() {
+  ledVermelhoLigado = obterAlertaGeral();
+  ledVerdeLigado = !ledVermelhoLigado;
+  digitalWrite(LED_VERDE, ledVerdeLigado ? HIGH : LOW);
+  digitalWrite(LED_VERMELHO, ledVermelhoLigado ? HIGH : LOW);
+}
+
+void controlarBuzzer() {
+  const unsigned long agora = millis();
+  buzzerEmAlerta = obterAlertaGeral();
+
+  if (!buzzerEmAlerta) {
+    if (buzzerLigado) noTone(BUZZER_PIN);
+    buzzerLigado = false;
+    ultimaTrocaBuzzer = agora;
+    return;
+  }
+
+  if (buzzerLigado && agora - ultimaTrocaBuzzer >= BUZZER_LIGADO_MS) {
+    noTone(BUZZER_PIN);
+    buzzerLigado = false;
+    ultimaTrocaBuzzer = agora;
+  } else if (!buzzerLigado && agora - ultimaTrocaBuzzer >= BUZZER_PAUSA_MS) {
+    tone(BUZZER_PIN, BUZZER_FREQUENCIA);
+    buzzerLigado = true;
+    ultimaTrocaBuzzer = agora;
+  }
+}
+
+void controlarRele() {
+  const bool solicitarVentilacao = obterAlertaAmbiental();
+
+#if USAR_RELE
+  releLigado = solicitarVentilacao;
+  const int nivelGPIO = (releLigado == (bool)RELE_ATIVO_EM_LOW) ? LOW : HIGH;
+  digitalWrite(RELE_PIN, nivelGPIO);
+#else
+  releLigado = false;
+#endif
+
+  ventilacaoLigada = releLigado;  // Estado COMANDADO; nao e realimentacao da ventoinha.
+
+  // Mostra apenas transicoes para facilitar os testes.
+  static bool primeiroRegistro = true;
+  static bool estadoAnterior = false;
+  if (primeiroRegistro || estadoAnterior != releLigado) {
+    primeiroRegistro = false;
+    estadoAnterior = releLigado;
+    Serial.printf("[RELE] %s | GPIO%d=%s | canal HL-52S: IN2\n",
+                  estadoTexto(releLigado), RELE_PIN,
+#if USAR_RELE
+                  digitalRead(RELE_PIN) == HIGH ? "HIGH" : "LOW"
+#else
+                  "NAO CONFIGURADO"
+#endif
+    );
+  }
+}
+
+// ========================================================
+// 9. DIAGNOSTICO SERIAL E JSON PARA O DASHBOARD
+// ========================================================
+void mostrarDados() {
+  Serial.println("\n========== SMARTAIR v4.2 ==========");
+  if (erroDHT) {
+    Serial.println("Temperatura: ERRO | Umidade: ERRO");
+  } else {
+    Serial.printf("Temperatura: %.1f C | Umidade: %.1f %%\n", temperatura, umidade);
+  }
+  Serial.printf("MQ-135: %d ADC (%s)\n", mq135Valor, estadoMQTexto());
+  Serial.printf("Alerta temperatura: %s\n", alertaTemperatura ? "SIM" : "NAO");
+  Serial.printf("Alerta umidade: %s\n", alertaUmidade ? "SIM" : "NAO");
+  Serial.printf("Alerta qualidade do ar: %s\n", alertaQualidadeAr ? "SIM" : "NAO");
+  Serial.printf("Estado geral: %s\n", obterAlertaGeral() ? "ALERTA" : "NORMAL");
+  Serial.printf("LED VERDE: %s | LED VERMELHO: %s\n",
+                estadoTexto(ledVerdeLigado), estadoTexto(ledVermelhoLigado));
+  Serial.printf("BUZZER: %s | BUZZER EM ALERTA: %s\n",
+                estadoTexto(buzzerLigado), buzzerEmAlerta ? "SIM" : "NAO");
+  Serial.printf("RELE: %s | VENTILACAO (COMANDO): %s\n",
+                estadoTexto(releLigado), estadoTexto(ventilacaoLigada));
+  Serial.printf("Wi-Fi: %s\n", WiFi.status() == WL_CONNECTED ? "CONECTADO" : "DESCONECTADO");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("IP ESP32: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("Gateway: ");
+    Serial.println(WiFi.gatewayIP());
+  }
+  Serial.printf("API: %s\n", SERVER_URL);
+  Serial.println("===================================");
+}
+
+String criarJSON() {
+  JsonDocument doc;
+  if (erroDHT) {
+    doc["temperatura"] = nullptr;
+    doc["umidade"] = nullptr;
+  } else {
+    doc["temperatura"] = temperatura;
+    doc["umidade"] = umidade;
+  }
+
+  doc["mq135"] = mq135Valor;
+  doc["alerta"] = obterAlertaGeral();
+  doc["alertaTemperatura"] = alertaTemperatura;
+  doc["alertaUmidade"] = alertaUmidade;
+  doc["alertaQualidadeAr"] = alertaQualidadeAr;
+  doc["erroDHT"] = erroDHT;
+  doc["ledVerdeLigado"] = ledVerdeLigado;
+  doc["ledVermelhoLigado"] = ledVermelhoLigado;
+  doc["buzzerLigado"] = buzzerLigado;
+  doc["buzzerEmAlerta"] = buzzerEmAlerta;
+  doc["releLigado"] = releLigado;
+  doc["ventilacaoLigada"] = ventilacaoLigada;
+  doc["releHabilitado"] = (bool)USAR_RELE;
+  doc["estadoMQ"] = estadoMQTexto();
+
+  if (estadoMQ == MQ_PRONTO) {
+    doc["baselineMQ135"] = mq135Baseline;
+    doc["limiteMQ135"] = mq135LimiteAlerta;
+  }
+
+  String json;
+  serializeJson(doc, json);
+  return json;
+}
+
+// ========================================================
+// 10. ENVIO HTTP
+// ========================================================
+void enviarDados() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("HTTP: Wi-Fi desconectado, envio ignorado.");
+    return;
+  }
+  // Mantem compatibilidade com o comportamento da API anterior.
+  if (erroDHT) {
+    Serial.println("HTTP: DHT com erro, envio suspenso.");
+    return;
+  }
+
+  WiFiClient client;
+  HTTPClient http;
+  http.setTimeout(3000);
+
+  if (!http.begin(client, SERVER_URL)) {
+    Serial.println("HTTP: erro ao iniciar conexao.");
+    return;
+  }
+
+  http.addHeader("Content-Type", "application/json");
+  const String json = criarJSON();
+  Serial.println("JSON -> " + json);
+  const int status = http.POST(json);
+  Serial.printf("POST API -> HTTP %d\n", status);
+  if (status > 0) {
+    Serial.println("Resposta API: " + http.getString());
+  } else {
+    Serial.println("Erro HTTP: " + http.errorToString(status));
+  }
+  http.end();
+}
+
+// ========================================================
+// 11. SETUP E LOOP
+// ========================================================
+void setup() {
+  Serial.begin(9600);
+  delay(200);
+
+  // O HL-52S e ativo em LOW: mantem HIGH para repouso.
+  // O controle fisico comeca antes dos sensores e do Wi-Fi.
+#if USAR_RELE
+  digitalWrite(RELE_PIN, RELE_ATIVO_EM_LOW ? HIGH : LOW);
+  pinMode(RELE_PIN, OUTPUT);
+#endif
+
+  digitalWrite(LED_VERDE, LOW);
+  digitalWrite(LED_VERMELHO, LOW);
+  pinMode(LED_VERDE, OUTPUT);
+  pinMode(LED_VERMELHO, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  noTone(BUZZER_PIN);
+
+  dht.begin();
+  pinMode(MQ135_PIN, INPUT);
+  analogReadResolution(12);
+
+  inicioSistema = millis();
+  ultimaTrocaBuzzer = inicioSistema;
+
+  Serial.println("\nSMARTAIR ESP32 - FIRMWARE v4.2");
+  Serial.println("Rele HL-52S: GPIO27 -> IN2 | ativo LOW | iniciado DESLIGADO");
+  Serial.println("Monitor Serial: 9600 baud | OLED/BLE: ausentes");
+  conectarWiFi();
+}
+
+void loop() {
+  const unsigned long agora = millis();
+  calibrarMQ135();
+
+  bool novaLeitura = false;
+  if (agora - ultimaLeitura >= LEITURA_MS) {
+    ultimaLeitura = agora;
+    atualizarSensores();
+    novaLeitura = true;
+  }
+
+  controlarLEDs();
+  controlarBuzzer();
+  controlarRele();
+  if (novaLeitura) mostrarDados();
+
+  if (WiFi.status() != WL_CONNECTED &&
+      agora - ultimaTentativaWiFi >= WIFI_TENTATIVA_MS) {
+    WiFi.disconnect();
+    conectarWiFi();
+  }
+
+  if (agora - ultimoHTTP >= HTTP_MS) {
+    ultimoHTTP = agora;
+    enviarDados();
+  }
+  delay(5);
+}
